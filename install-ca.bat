@@ -1,42 +1,52 @@
 @echo off
-chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
-REM ============================================================
-REM  安装/卸载 ProxyScope 根证书到「当前用户」受信任根存储
-REM  用法: install-ca.bat          安装
-REM        install-ca.bat remove   卸载
-REM ============================================================
+REM ===========================================================
+REM  Install / remove the ProxyScope root CA (current user only)
+REM
+REM  ASCII-only on purpose: cmd.exe parses .bat with the system
+REM  ANSI codepage, so UTF-8 Chinese here would be mojibake.
+REM
+REM  usage: install-ca.bat          install
+REM         install-ca.bat remove   uninstall
+REM ===========================================================
 
-set CA=%~dp0data\certs\proxyscope-ca.crt
+set "CA=%~dp0data\certs\proxyscope-ca.crt"
 
 if not exist "%CA%" (
-    echo [x] 未找到 CA 证书: %CA%
-    echo     请先运行一次 start.bat，代理会自动生成 CA。
+    echo [x] CA certificate not found:
+    echo     %CA%
+    echo.
+    echo     Run start.bat once first; the CA is generated on startup.
+    echo.
     pause
     exit /b 1
 )
 
-if /i "%~1"=="remove" (
-    echo [*] 从「受信任的根证书颁发机构」移除 ProxyScope Root CA ...
-    certutil -user -delstore Root "ProxyScope Root CA" >nul 2>&1
-    echo [*] 已移除。
-    goto END
-)
+if /i "%~1"=="remove" goto :remove
 
-echo [*] 安装证书到当前用户受信任根存储：
+echo [*] Installing trusted root CA for the current user:
 echo     %CA%
+echo.
 certutil -user -addstore -f Root "%CA%"
 if errorlevel 1 (
-    echo [x] 安装失败。
-) else (
     echo.
-    echo [√] 安装完成。现在 HTTPS 流量可被 ProxyScope 解密查看。
-    echo     卸载命令: install-ca.bat remove
+    echo [x] Installation failed.
+    pause
+    exit /b 1
 )
-
-:END
+echo.
+echo [ok] Done. HTTPS traffic can now be decrypted by ProxyScope.
+echo      To uninstall: install-ca.bat remove
 echo.
 pause
-endlocal
+exit /b 0
+
+:remove
+echo [*] Removing ProxyScope Root CA from the current user store...
+certutil -user -delstore Root "ProxyScope Root CA" >nul 2>&1
+echo [ok] Removed.
+echo.
+pause
+exit /b 0

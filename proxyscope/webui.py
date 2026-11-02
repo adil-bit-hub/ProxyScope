@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import json
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -150,6 +151,20 @@ class ApiHandler(BaseHTTPRequestHandler):
         return self._json(flow)
 
 
+class ThreadingHTTPServerQuiet(ThreadingHTTPServer):
+    """吞掉浏览器预连接/关闭引发的 ConnectionResetError，避免刷屏。"""
+
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionResetError, ConnectionAbortedError,
+                            BrokenPipeError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
+
+
 class WebUI:
     def __init__(self, store: FlowStore, host: str = "127.0.0.1",
                  port: int = 8787, ca_pem: bytes | None = None,
@@ -168,7 +183,7 @@ class WebUI:
             "store": self.store,
             "proxy_stats": staticmethod(self.proxy_stats) if self.proxy_stats else None,
         })
-        self._httpd = ThreadingHTTPServer((self.host, self.port), handler)
+        self._httpd = ThreadingHTTPServerQuiet((self.host, self.port), handler)
         self._httpd.daemon_threads = True
         self._httpd.verbose = self.verbose
         self._httpd.ca_pem = self.ca_pem
