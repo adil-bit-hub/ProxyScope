@@ -1,0 +1,62 @@
+# ===== 运行期数据（务必不要提交）=====
+# CA 私钥、按域名签发的证书、抓包数据库都落在这里。
+# 私钥泄露 = 别人可以伪造任意站点证书；数据库里有真实 Cookie/Token。
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# 证书与密钥
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+!docs/**/*.crt
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+ENV/
+
+# ===== 编辑器 / 系统 =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== 日志与临时文件 =====
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+
+# ===== 本地配置 =====
+.python-path
+*.local
+.env
+.env.*

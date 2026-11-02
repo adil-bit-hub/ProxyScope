@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ProxyScope — 流量捕获与检索</title>
+<style>
+  :root {
+    --bg: #1b1d21;
+    --bg2: #23262b;
+    --bg3: #2b2f36;
+    --line: #3a3f47;
+    --fg: #dfe3e8;
+    --fg2: #9aa3ad;
+    --accent: #ff6633;
+    --blue: #4a9eff;
+    --green: #43bf6e;
+    --yellow: #d9b04a;
+    --red: #e05b5b;
+    --mono: "Cascadia Mono", "Consolas", "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 13px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  /* ---------- 顶栏 ---------- */
+  header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; background: var(--bg2);
+    border-bottom: 1px solid var(--line); flex: none;
+  }
+  .logo { font-weight: 700; letter-spacing: .5px; color: var(--accent); }
+  .logo span { color: var(--fg2); font-weight: 400; font-size: 12px; margin-left: 6px; }
+  .spacer { flex: 1; }
+  .stat { color: var(--fg2); font-size: 12px; white-space: nowrap; }
+  .stat b { color: var(--fg); font-weight: 600; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+         background: var(--green); margin-right: 5px; vertical-align: middle; }
+
+  /* ---------- 工具条 ---------- */
+  .toolbar {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 6px 12px; background: var(--bg2);
+    border-bottom: 1px solid var(--line); flex: none;
+  }
+  input[type=text], select, button {
+    background: var(--bg3); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 5px 8px; font-size: 12px; font-family: inherit; outline: none;
+  }
+  input[type=text]:focus, select:focus { border-color: var(--blue); }
+  input[type=text]::placeholder { color: #6b7480; }
+  #q { flex: 1; min-width: 180px; font-family: var(--mono); }
+  button { cursor: pointer; }
+  button:hover { background: #343943; border-color: #4d545e; }
+  button.primary { background: #3a4250; border-color: #4d5665; }
+  button.danger:hover { background: #6b2a2a; border-color: #8a3a3a; }
+  label.chk { display: inline-flex; align-items: center; gap: 4px;
+              color: var(--fg2); font-size: 12px; cursor: pointer; user-select: none; }
+
+  /* ---------- 主区域 ---------- */
+  main { flex: 1; display: flex; min-height: 0; }
+  .left { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .splitter { width: 5px; cursor: col-resize; background: var(--line); flex: none; }
+  .splitter:hover { background: var(--blue); }
+  .right { width: 46%; min-width: 320px; display: flex; flex-direction: column;
+           border-left: 1px solid var(--line); background: var(--bg2); }
+
+  /* ---------- 表格 ---------- */
+  .tablewrap { flex: 1; overflow: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  thead th {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--bg3); color: var(--fg2); font-weight: 600;
+    text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line);
+    white-space: nowrap; user-select: none;
+  }
+  tbody td {
+    padding: 4px 8px; border-bottom: 1px solid #2c3037;
+    font-family: var(--mono); font-size: 11.5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 520px;
+  }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #272b32; }
+  tbody tr.sel { background: #33405a !important; }
+  .m-get { color: var(--green); }
+  .m-post { color: var(--yellow); }
+  .m-put, .m-patch { color: var(--blue); }
+  .m-delete { color: var(--red); }
+  .s2 { color: var(--green); }
+  .s3 { color: #6fbfb0; }
+  .s4 { color: var(--yellow); }
+  .s5 { color: var(--red); }
+  .host { color: #c8b6e2; }
+  .tls { color: var(--green); margin-right: 3px; }
+  .empty { padding: 40px; text-align: center; color: var(--fg2); }
+
+  /* ---------- 详情 ---------- */
+  .tabs { display: flex; gap: 2px; background: var(--bg3); padding: 4px 6px 0;
+          border-bottom: 1px solid var(--line); flex: none; overflow-x: auto; }
+  .tab { padding: 5px 11px; font-size: 12px; cursor: pointer; color: var(--fg2);
+         border-radius: 4px 4px 0 0; white-space: nowrap; }
+  .tab:hover { color: var(--fg); }
+  .tab.on { background: var(--bg2); color: var(--accent); font-weight: 600; }
+  .pane { flex: 1; overflow: auto; padding: 10px 12px; min-height: 0; }
+  .pane.hidden { display: none; }
+  pre { margin: 0; font-family: var(--mono); font-size: 11.5px;
+        white-space: pre-wrap; word-break: break-all; color: #cfd6dd; }
+  .kv { display: grid; grid-template-columns: minmax(90px, 30%) 1fr; gap: 2px 10px;
+        font-size: 12px; }
+  .kv dt { color: var(--fg2); font-family: var(--mono); }
+  .kv dd { margin: 0; font-family: var(--mono); word-break: break-all; }
+  .imgbox { background: repeating-conic-gradient(#2a2e35 0 25%, #23262b 0 50%) 0 0/16px 16px;
+            padding: 8px; border-radius: 4px; text-align: center; margin-top: 8px; }
+  .imgbox img { max-width: 100%; max-height: 70vh; }
+  .note { color: var(--fg2); font-size: 12px; padding: 6px 0; }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 3px;
+           font-size: 11px; background: var(--bg3); color: var(--fg2); }
+  .badge.err { background: #4a2323; color: #ff9a9a; }
+
+  /* ---------- 报文视图 ---------- */
+  .msgbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+            flex-wrap: wrap; flex: none; }
+  .msgbar button { padding: 3px 10px; }
+  .msg { border: 1px solid #2c3037; border-radius: 4px; padding: 8px 10px;
+         background: #1e2126; }
+  .seg { border-top: 1px dashed #3a3f47; margin: 8px 0 6px; }
+  .segname { color: var(--fg2); font-size: 11px; letter-spacing: .5px;
+             text-transform: uppercase; margin-bottom: 4px; }
+  footer { flex: none; padding: 4px 12px; background: var(--bg2);
+           border-top: 1px solid var(--line); color: var(--fg2); font-size: 11.5px;
+           display: flex; gap: 16px; align-items: center; }
+  #toast { position: fixed; right: 18px; bottom: 40px; background: #2f3540;
+           border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px;
+           font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">ProxyScope<span>流量捕获与检索</span></div>
+  <div class="spacer"></div>
+  <div class="stat"><span class="dot" id="live"></span><span id="statProxy">—</span></div>
+  <div class="stat">记录 <b id="statCount">0</b></div>
+  <div class="stat">流量 <b id="statBytes">0 B</b></div>
+</header>
+
+<div class="toolbar">
+  <input type="text" id="q" placeholder="搜索关键字（URL / 请求体 / 响应体）  回车检索">
+  <input type="text" id="fHost" placeholder="host 过滤" style="width:130px">
+  <select id="fMethod">
+    <option value="">全部方法</option>
+    <option>GET</option><option>POST</option><option>PUT</option>
+    <option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
+  </select>
+  <select id="fStatus">
+    <option value="">全部状态</option>
+    <option value="2xx">2xx</option><option value="3xx">3xx</option>
+    <option value="4xx">4xx</option><option value="5xx">5xx</option>
+    <option value=">=400">≥400</option>
+  </select>
+  <select id="fScheme">
+    <option value="">HTTP+HTTPS</option>
+    <option value="https">仅 HTTPS</option>
+    <option value="http">仅 HTTP</option>
+  </select>
+  <button id="btnSearch" class="primary">检索</button>
+  <button id="btnReset">重置</button>
+  <label class="chk"><input type="checkbox" id="autoRefresh" checked> 自动刷新</label>
+  <button id="btnClear" class="danger">清空</button>
+</div>
+
+<main>
+  <div class="left">
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:56px">#</th>
+            <th style="width:70px">方法</th>
+            <th style="width:52px">状态</th>
+            <th style="width:70px">时间</th>
+            <th>主机</th>
+            <th>路径</th>
+            <th style="width:80px">大小</th>
+            <th style="width:66px">耗时</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="empty" id="empty">暂无记录 — 请把浏览器/工具代理设置为本机代理端口</div>
+    </div>
+  </div>
+  <div class="splitter" id="splitter"></div>
+  <div class="right" id="rightPane">
+    <div class="tabs" id="tabs">
+      <div class="tab on" data-tab="overview">概要</div>
+      <div class="tab" data-tab="req">请求</div>
+      <div class="tab" data-tab="resp">响应</div>
+    </div>
+    <div class="pane" id="pane"><div class="note">在左侧选择一条记录查看详情</div></div>
+  </div>
+</main>
+
+<footer>
+  <span id="footLeft">就绪</span>
+  <span class="spacer"></span>
+  <span id="footRight"></span>
+</footer>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let flows = [];
+let selectedId = null;
+let detailCache = new Map();
+let currentTab = "overview";
+let currentDetail = null;
+let lastMaxId = 0;
+let timer = null;
+let searchMode = false;
+let prettyMode = true;   // JSON 美化开关（仅影响报文视图里的正文）
+
+const fmtBytes = (n) => {
+  if (!n) return "0 B";
+  const u = ["B","KB","MB","GB"]; let i = 0; let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? v : v.toFixed(1)) + " " + u[i];
+};
+const fmtTime = (ts) => {
+  const d = new Date(ts * 1000);
+  const p = (x, n = 2) => String(x).padStart(n, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};
+const fmtDur = (ms) => ms < 1000 ? Math.round(ms) + "ms" : (ms/1000).toFixed(2) + "s";
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => (
+  {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 1800);
+}
+
+/* ============ 数据加载 ============ */
+function buildQuery(extra = {}) {
+  const p = new URLSearchParams();
+  const q = $("q").value.trim();
+  if (q) p.set("q", q);
+  const host = $("fHost").value.trim();
+  if (host) p.set("host", host);
+  if ($("fMethod").value) p.set("method", $("fMethod").value);
+  if ($("fStatus").value) p.set("status", $("fStatus").value);
+  if ($("fScheme").value) p.set("scheme", $("fScheme").value);
+  for (const [k, v] of Object.entries(extra)) p.set(k, v);
+  return p;
+}
+
+async function loadStats() {
+  try {
+    const r = await fetch("/api/stats");
+    const d = await r.json();
+    $("statCount").textContent = d.store.count.toLocaleString();
+    $("statBytes").textContent = fmtBytes((d.store.req_bytes || 0) + (d.store.resp_bytes || 0));
+    if (d.proxy) {
+      $("statProxy").textContent = `代理在线 · 活跃 ${d.proxy.active} / 累计 ${d.proxy.total}`;
+      $("live").style.background = "var(--green)";
+    }
+    $("footRight").textContent = d.store.top_hosts?.length
+      ? "热点: " + d.store.top_hosts.slice(0, 3).map(h => `${h.host}(${h.count})`).join("  ")
+      : "";
+  } catch (e) { $("live").style.background = "var(--red)"; }
+}
+
+async function loadFlows() {
+  const p = buildQuery({ limit: 200 });
+  try {
+    const r = await fetch("/api/flows?" + p);
+    const d = await r.json();
+    flows = d.items || [];
+    renderRows();
+    $("empty").style.display = flows.length ? "none" : "block";
+    $("footLeft").textContent = searchMode
+      ? `检索到 ${d.total} 条（显示 ${flows.length} 条）`
+      : `共 ${d.total} 条（显示最新 ${flows.length} 条）`;
+    if (flows.length) lastMaxId = Math.max(lastMaxId, ...flows.map(f => f.id));
+  } catch (e) { $("footLeft").textContent = "加载失败"; }
+}
+
+function renderRows() {
+  const tb = $("rows");
+  tb.innerHTML = flows.map(f => {
+    const m = (f.method || "").toLowerCase();
+    const s = f.status || 0;
+    const scls = s >= 500 ? "s5" : s >= 400 ? "s4" : s >= 300 ? "s3" : s >= 200 ? "s2" : "";
+    const size = fmtBytes((f.req_size || 0) + (f.resp_size || 0));
+    const path = (f.path || "/") + (f.query ? "?" + f.query : "");
+    return `<tr data-id="${f.id}" class="${f.id === selectedId ? "sel" : ""}">
+      <td>${f.id}</td>
+      <td class="m-${m}">${esc(f.method)}</td>
+      <td class="${scls}">${s || "-"}</td>
+      <td>${fmtTime(f.ts)}</td>
+      <td class="host">${f.tls ? '<span class="tls">🔒</span>' : ""}${esc(f.host)}${f.port && ![80,443].includes(f.port) ? ":" + f.port : ""}</td>
+      <td title="${esc(path)}">${esc(path)}</td>
+      <td>${size}</td>
+      <td>${fmtDur(f.duration_ms || 0)}</td>
+    </tr>`;
+  }).join("");
+}
+
+$("rows").addEventListener("click", (e) => {
+  const tr = e.target.closest("tr[data-id]");
+  if (!tr) return;
+  selectFlow(parseInt(tr.dataset.id, 10));
+});
+
+async function selectFlow(id) {
+  selectedId = id;
+  document.querySelectorAll("#rows tr").forEach(tr =>
+    tr.classList.toggle("sel", parseInt(tr.dataset.id, 10) === id));
+  let d = detailCache.get(id);
+  if (!d) {
+    const r = await fetch("/api/flows/" + id);
+    if (!r.ok) { toast("记录不存在"); return; }
+    d = await r.json();
+    detailCache.set(id, d);
+    if (detailCache.size > 50) detailCache.delete(detailCache.keys().next().value);
+  }
+  currentDetail = d;
+  renderDetail(d);
+}
+
+/* ============ 正文解码 ============ */
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+const decodeB64 = (b64) => new TextDecoder("utf-8", { fatal: false }).decode(b64ToBytes(b64));
+
+function headerValue(headers, name) {
+  const hit = (headers || []).find(([k]) => k.toLowerCase() === name.toLowerCase());
+  return hit ? hit[1] : "";
+}
+function looksBinary(mime, text) {
+  if (mime && !/^(text\/|application\/(json|xml|javascript|ecmascript|x-www-form-urlencoded|graphql|x-ndjson)|image\/svg)/.test(mime)) return true;
+  // 文本里出现大量控制字符也按二进制处理
+  let ctrl = 0;
+  for (let i = 0; i < Math.min(text.length, 2000); i++) {
+    const c = text.charCodeAt(i);
+    if (c < 9 || (c > 13 && c < 32)) ctrl++;
+  }
+  return ctrl > Math.min(text.length, 2000) * 0.1;
+}
+
+/* ============ 报文视图：头 + 体合并 ============ */
+function messageText(kind, d) {
+  const isReq = kind === "req";
+  const headers = (isReq ? d.req_headers : d.resp_headers) || [];
+  const firstLine = isReq
+    ? `${d.method} ${d.path || "/"}${d.query ? "?" + d.query : ""} ${d.http_version || "HTTP/1.1"}`
+    : `${(d.http_version || "HTTP/1.1")} ${d.status ?? ""} ${d.status_text || ""}`.trimEnd();
+  const head = [firstLine, ...headers.map(([k, v]) => `${k}: ${v}`)].join("\n");
+
+  const b64 = d[isReq ? "req_body_b64" : "resp_body_b64"];
+  if (!b64) return { head, body: "", full: head, hasBody: false };
+
+  const ct = headerValue(headers, "content-type") || d.mime || "";
+  const mime = (ct.split(";")[0] || "").trim().toLowerCase();
+  let body = decodeB64(b64);
+  if (prettyMode && (mime.includes("json") || /^\s*[\{\[]/.test(body.slice(0, 64)))) {
+    try { body = JSON.stringify(JSON.parse(body), null, 2); } catch (e) {}
+  }
+  return {
+    head, body, hasBody: true, mime,
+    full: head + "\n\n" + body,
+  };
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("已复制到剪贴板");
+  } catch (e) {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); toast("已复制到剪贴板"); }
+    catch (_) { toast("复制失败"); }
+    ta.remove();
+  }
+}
+
+function renderMessage(kind, d) {
+  const pane = $("pane");
+  const isReq = kind === "req";
+  const msg = messageText(kind, d);
+  const size = isReq ? (d.req_size || 0) : (d.resp_size || 0);
+  const truncated = isReq ? d.req_truncated : d.resp_truncated;
+  const headers = (isReq ? d.req_headers : d.resp_headers) || [];
+  const ct = headerValue(headers, "content-type") || d.mime || "";
+  const mime = (ct.split(";")[0] || "").trim().toLowerCase();
+  const isImg = mime.startsWith("image/") && mime !== "image/svg+xml";
+  const b64 = d[isReq ? "req_body_b64" : "resp_body_b64"];
+  const binary = msg.hasBody && !isImg && looksBinary(mime, msg.body);
+
+  let parts = `
+    <div class="msgbar">
+      <span class="badge">${isReq ? "HTTP 请求" : "HTTP 响应"}</span>
+      <span class="badge">${fmtBytes(size)}</span>
+      ${truncated ? '<span class="badge err">已截断</span>' : ""}
+      ${binary ? '<span class="badge">二进制正文</span>' : ""}
+      <button id="btnCopyMsg">复制全文</button>
+      <label class="chk"><input type="checkbox" id="chkPretty" ${prettyMode ? "checked" : ""}> JSON 美化</label>
+    </div>`;
+
+  parts += `<div class="msg"><pre>${esc(msg.head)}</pre>`;
+  if (isImg) {
+    parts += `<div class="imgbox"><img src="data:${esc(mime)};base64,${b64}"></div>`;
+  } else if (msg.hasBody) {
+    parts += `<div class="seg"></div><pre>${esc(msg.body)}</pre>`;
+  }
+  if (!msg.hasBody) {
+    parts += `<div class="seg"></div><div class="segname">无正文字节</div>`;
+  }
+  parts += `</div>`;
+
+  pane.innerHTML = parts;
+  $("btnCopyMsg").onclick = () => copyText(msg.full);
+  $("chkPretty").onchange = (e) => { prettyMode = e.target.checked; renderDetail(d); };
+}
+
+/* ============ 详情渲染 ============ */
+function renderDetail(d) {
+  const pane = $("pane");
+  if (currentTab === "req") return renderMessage("req", d);
+  if (currentTab === "resp") return renderMessage("resp", d);
+
+  const url = `${d.scheme}://${d.host}${[80,443].includes(d.port) ? "" : ":" + d.port}${d.path}${d.query ? "?" + d.query : ""}`;
+  pane.innerHTML = `
+    <dl class="kv">
+      <dt>URL</dt><dd>${esc(url)}</dd>
+      <dt>方法</dt><dd>${esc(d.method)} ${esc(d.http_version)}</dd>
+      <dt>状态</dt><dd>${d.status || "-"} ${esc(d.status_text)}</dd>
+      <dt>类型</dt><dd>${esc(d.mime) || "-"}</dd>
+      <dt>耗时</dt><dd>${fmtDur(d.duration_ms || 0)}</dd>
+      <dt>时间</dt><dd>${new Date(d.ts * 1000).toLocaleString()}</dd>
+      <dt>请求大小</dt><dd>${fmtBytes(d.req_size)}${d.req_truncated ? " (已截断)" : ""}</dd>
+      <dt>响应大小</dt><dd>${fmtBytes(d.resp_size)}${d.resp_truncated ? " (已截断)" : ""}</dd>
+      <dt>TLS</dt><dd>${d.tls ? "是（已解密）" : "否"}</dd>
+      <dt>客户端</dt><dd>${esc(d.client_addr)}</dd>
+      ${d.error ? `<dt>错误</dt><dd><span class="badge err">${esc(d.error)}</span></dd>` : ""}
+    </dl>`;
+}
+
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
+  t.classList.add("on");
+  currentTab = t.dataset.tab;
+  if (selectedId != null && detailCache.has(selectedId)) {
+    currentDetail = detailCache.get(selectedId);
+    renderDetail(currentDetail);
+  }
+}));
+
+/* ============ 检索与工具栏 ============ */
+function doSearch() {
+  searchMode = !!($("q").value.trim() || $("fHost").value.trim() ||
+                  $("fMethod").value || $("fStatus").value || $("fScheme").value);
+  loadFlows();
+  loadStats();
+}
+$("btnSearch").onclick = doSearch;
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+$("fHost").addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+["fMethod","fStatus","fScheme"].forEach(id => $(id).onchange = doSearch);
+
+$("btnReset").onclick = () => {
+  $("q").value = ""; $("fHost").value = "";
+  $("fMethod").value = ""; $("fStatus").value = ""; $("fScheme").value = "";
+  searchMode = false; selectedId = null; detailCache.clear(); currentDetail = null;
+  $("pane").innerHTML = '<div class="note">在左侧选择一条记录查看详情</div>';
+  loadFlows(); loadStats();
+};
+
+$("btnClear").onclick = async () => {
+  if (!confirm("确定清空所有已捕获记录？此操作不可撤销。")) return;
+  await fetch("/api/flows/clear", { method: "POST" });
+  selectedId = null; detailCache.clear(); currentDetail = null; lastMaxId = 0;
+  $("pane").innerHTML = '<div class="note">已清空</div>';
+  loadFlows(); loadStats();
+  toast("已清空");
+};
+
+/* 自动刷新（检索模式下不打断结果） */
+function scheduleRefresh() {
+  clearInterval(timer);
+  timer = setInterval(async () => {
+    if (!$("autoRefresh").checked) return;
+    await loadStats();
+    if (!searchMode) await loadFlows();
+  }, 2000);
+}
+
+/* 分栏拖拽 */
+(function () {
+  const sp = $("splitter"), right = $("rightPane");
+  let dragging = false;
+  sp.addEventListener("mousedown", () => { dragging = true; document.body.style.cursor = "col-resize"; });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const w = Math.min(Math.max(window.innerWidth - e.clientX, 280), window.innerWidth - 420);
+    right.style.width = w + "px";
+  });
+  window.addEventListener("mouseup", () => { dragging = false; document.body.style.cursor = ""; });
+})();
+
+loadStats(); loadFlows(); scheduleRefresh();
+</script>
+</body>
+</html>

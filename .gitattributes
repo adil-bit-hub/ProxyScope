@@ -1,0 +1,41 @@
+# 默认：Git 自动判断文本/二进制，仓库内统一存 LF
+* text=auto
+
+# ---- 关键：shell 脚本必须始终保持 LF ----
+# Windows 上 core.autocrlf=true 会把 .sh 转成 CRLF，
+# 到 Linux 执行时报 "$'\r': command not found"。
+*.sh   text eol=lf
+*.bash text eol=lf
+*.service text eol=lf
+
+# 配置文件也用 LF
+*.py     text eol=lf
+*.md     text eol=lf
+*.json   text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.toml   text eol=lf
+*.cfg    text eol=lf
+*.ini    text eol=lf
+.gitignore    text eol=lf
+.gitattributes text eol=lf
+LICENSE  text eol=lf
+
+# ---- Windows 批处理必须是 CRLF ----
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# ---- 二进制：不做任何转换 ----
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.zip  binary
+*.gz   binary
+*.db   binary
+*.sqlite binary
