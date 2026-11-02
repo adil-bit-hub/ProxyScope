@@ -152,6 +152,46 @@ def guess_mime(headers: Headers) -> str:
     return ct.split(";")[0].strip().lower()
 
 
+async def start_tls_server(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    ctx: ssl.SSLContext,
+) -> tuple[asyncio.StreamReader | None, asyncio.StreamWriter | None]:
+    """把已建立的明文连接就地升级为服务端 TLS（MITM 接管 CONNECT 隧道）。
+
+    Python 3.11+ 有 StreamWriter.start_tls()，原地升级即可，返回 (None, None)。
+    Python 3.10 及更早没有该 API：直接对底层 socket 完成 TLS 握手，
+    再用同一 socket 重建一对待读写流，返回给调用方替换旧的 reader/writer。
+
+    做法是让 asyncio 自己处理加解密：把 socket 交给
+    loop.start_tls()，由事件循环接管，比手工驱动 SSLObject 稳定得多。
+    """
+    if hasattr(writer, "start_tls"):
+        await writer.start_tls(ctx)          # 3.11+：原地升级
+        return None, None
+
+    # ---- Python <= 3.10 兼容路径 ----
+    transport = writer.transport
+    protocol = transport.get_protocol()
+    raw_sock = transport.get_extra_info("socket")
+    if raw_sock is None:
+        raise RuntimeError("无法获取底层 socket，TLS 升级失败")
+
+    loop = asyncio.get_running_loop()
+
+    # 让事件循环把这个 transport 升级成 TLS，返回新的 transport；
+    # 底层的 StreamReader/Protocol 会被复用，因此 reader 无需更换。
+    new_transport = await loop.start_tls(
+        transport, protocol, ctx, server_side=True,
+    )
+    if new_transport is None:
+        raise RuntimeError("TLS 升级失败")
+
+    # 绑定新的 transport 到原有 writer，后续读写都走加密通道
+    writer._transport = new_transport            # type: ignore[attr-defined]
+    return None, None
+
+
 class ProxyServer:
     def __init__(
         self,
@@ -258,11 +298,16 @@ class ProxyServer:
                 writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                 await writer.drain()
                 try:
-                    await writer.start_tls(self._tls_for(host))
+                    new_reader, new_writer = await start_tls_server(
+                        reader, writer, self._tls_for(host)
+                    )
                 except Exception as exc:
                     if self.debug:
                         print(f"[proxy] tls handshake failed for {host}: {exc!r}")
                     return
+                # Python < 3.11 时对象被替换，必须让后续循环用新的流
+                if new_reader is not None:
+                    reader, writer = new_reader, new_writer
                 tls_on = True
                 tls_host = host
                 continue
